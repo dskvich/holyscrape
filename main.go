@@ -49,7 +49,7 @@ func processYear(currentYear int, baseURL, folderName string) {
 	for month := time.January; month <= time.December; month++ {
 		for day := 1; day <= daysInMonth(month, currentYear); day++ {
 			date := time.Date(currentYear, month, day, 0, 0, 0, 0, time.UTC)
-			formattedDate := date.Format("01-02") // Formats date as "MM-DD"
+			formattedDate := date.Format("2006-01-02") // Formats date as "YYYY-MM-DD"
 
 			url := fmt.Sprintf("%s/%s/%d", baseURL, monthTranslations[month.String()], day)
 			filename := fmt.Sprintf("%s/%s.html", folderName, formattedDate)
