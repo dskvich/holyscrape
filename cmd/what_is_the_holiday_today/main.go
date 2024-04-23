@@ -29,12 +29,12 @@ var monthTranslations = map[string]string{
 func main() {
 	start := time.Now()
 
-	baseURL, exists := os.LookupEnv("BASE_URL")
+	baseURL, exists := os.LookupEnv("WITLHT_URL")
 	if !exists {
-		log.Fatal("environment variable BASE_URL not set")
+		log.Fatal("environment variable WITLHT_URL not set")
 	}
 
-	const folderName = "output"
+	const folderName = "output_what_is_the_last_holiday_today"
 	if err := os.MkdirAll(folderName, 0755); err != nil {
 		log.Fatalf("error creating directory: %v", err)
 	}
