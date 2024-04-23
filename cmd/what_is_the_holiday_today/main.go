@@ -93,7 +93,8 @@ func fetchAndSaveHTML(url, outputFile string) error {
 	var siteHTML string
 	err := chromedp.Run(ctx,
 		chromedp.Navigate(url),
-		chromedp.WaitReady("html", chromedp.ByQuery),
+		//chromedp.WaitReady("html", chromedp.ByQuery),
+		chromedp.WaitReady(`h1[itemprop="name"]`, chromedp.ByQuery),
 		chromedp.OuterHTML("html", &siteHTML, chromedp.ByQuery),
 	)
 	if err != nil {
