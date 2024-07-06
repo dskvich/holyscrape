@@ -6,7 +6,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/PuerkitoBio/goquery"
 )
@@ -21,46 +23,77 @@ func main() {
 		"Православные праздники":  true,
 	}
 
-	const folderName = "output_calend"
+	const (
+		folderName   = "output_calend"
+		baseFileName = "insert_holidays_and_links.sql"
+	)
 	if err := os.MkdirAll(folderName, 0755); err != nil {
-		log.Fatalf("error creating directory: %v", err)
+		log.Fatal("Error creating directory:", err)
 	}
 
-	file, err := os.Create(folderName + "/insert_holidays.sql")
+	timestamp := time.Now().Unix()
+	fileName := fmt.Sprintf("%d_%s", timestamp, baseFileName)
+	filePath := filepath.Join(folderName, fileName)
+
+	file, err := os.Create(filePath)
 	if err != nil {
 		log.Fatal("Error creating SQL file:", err)
 	}
 	defer file.Close()
 
+	var holidayInserts []string
+	var linkInserts []string
+
+	for _, month := range months {
+		url := fmt.Sprintf("https://www.calend.ru/holidays/%s/", month)
+		processMonth(url, allowedCategories, &holidayInserts, &linkInserts)
+	}
+
 	writer := bufio.NewWriter(file)
 	defer writer.Flush()
 
-	_, err = writer.WriteString("-- Bulk Insert Into Holidays Table\n")
-	if err != nil {
-		log.Fatal("Error writing to file:", err)
-	}
-	_, err = writer.WriteString("INSERT INTO holidays (order_number, date, name) VALUES\n")
-	if err != nil {
-		log.Fatal("Error writing to file:", err)
+	writer.WriteString(`BEGIN;
+
+CREATE TABLE IF NOT EXISTS holiday_categories (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL UNIQUE
+);
+
+CREATE TABLE IF NOT EXISTS holiday_category_links (
+    holiday_id INT REFERENCES holidays(id) ON DELETE CASCADE,
+    category_id INT REFERENCES holiday_categories(id) ON DELETE CASCADE,
+    PRIMARY KEY (holiday_id, category_id)
+);
+
+DELETE FROM holidays;
+
+`)
+
+	if len(holidayInserts) > 0 {
+		writer.WriteString("INSERT INTO holidays (order_number, date, name) VALUES\n")
+		writer.WriteString(strings.Join(holidayInserts, ",\n"))
+		writer.WriteString(";\n")
 	}
 
-	firstEntry := true
-	for _, month := range months {
-		url := fmt.Sprintf("https://www.calend.ru/holidays/%s/", month)
-		firstEntry = processMonth(url, allowedCategories, writer, firstEntry)
+	for category := range allowedCategories {
+		categoryInsert := fmt.Sprintf(`
+INSERT INTO holiday_categories (name)
+VALUES ('%s')
+ON CONFLICT (name) DO NOTHING;`, strings.ReplaceAll(category, "'", "''"))
+		writer.WriteString(categoryInsert)
+		writer.WriteString("\n")
 	}
 
-	if !firstEntry {
-		// Backtrack to overwrite the last comma and write the semicolon
-		if _, err := writer.WriteString(";"); err != nil {
-			log.Fatal("Error writing final semicolon:", err)
-		}
+	if len(linkInserts) > 0 {
+		writer.WriteString(strings.Join(linkInserts, "\n"))
+		writer.WriteString("\n")
 	}
 
+	writer.WriteString("COMMIT;\n")
 	writer.Flush()
 }
 
-func processMonth(url string, allowedCategories map[string]bool, writer *bufio.Writer, firstEntry bool) bool {
+func processMonth(url string, allowedCategories map[string]bool, holidayInserts *[]string, linkInserts *[]string) {
 	resp, err := http.Get(url)
 	if err != nil {
 		log.Fatal("Error making HTTP request:", err)
@@ -103,20 +136,22 @@ func processMonth(url string, allowedCategories map[string]bool, writer *bufio.W
 				})
 
 				if len(categories) > 0 {
-					formattedName := fmt.Sprintf("%s [%s]", holidayName, strings.Join(categories, ", "))
-					sql := fmt.Sprintf("(%d, '%s', '%s')", orderNumber, date, formattedName)
-					if !firstEntry {
-						sql = ",\n" + sql // Prefix a comma if it's not the first entry
+					holidayInsert := fmt.Sprintf("(%d, '%s', '%s')", orderNumber, date, holidayName)
+					*holidayInserts = append(*holidayInserts, holidayInsert)
+
+					for _, category := range categories {
+						linkInsert := fmt.Sprintf(`
+INSERT INTO holiday_category_links (holiday_id, category_id)
+VALUES ((SELECT id FROM holidays WHERE order_number = %d AND name = '%s'), 
+       (SELECT id FROM holiday_categories WHERE name = '%s'))
+ON CONFLICT DO NOTHING;`, orderNumber, strings.ReplaceAll(holidayName, "'", "''"), strings.ReplaceAll(category, "'", "''"))
+
+						*linkInserts = append(*linkInserts, linkInsert)
 					}
-					_, err := writer.WriteString(sql)
-					if err != nil {
-						log.Fatal("Error writing to file:", err)
-					}
-					firstEntry = false
+
 					orderNumber++
 				}
 			})
 		}
 	})
-	return firstEntry
 }
